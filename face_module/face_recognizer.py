@@ -1,177 +1,143 @@
 """
-Face Recognizer Module
-Uses the face_recognition library (dlib-based) to encode and match faces.
-Supports loading known faces from dataset/known_faces/ and webcam registration.
+Face Recognizer
+Uses OpenCV LBPH (Local Binary Pattern Histograms).
+No dlib, no cmake, no build tools — works out of the box with OpenCV.
 """
 
 import os
-import pickle
-import numpy as np
-
-try:
-    import face_recognition
-    FACE_RECOGNITION_AVAILABLE = True
-except ImportError:
-    FACE_RECOGNITION_AVAILABLE = False
-    print("[WARNING] face_recognition not installed. Using fallback mode.")
-
 import cv2
+import numpy as np
+import pickle
 
 
 class FaceRecognizer:
-    ENCODINGS_FILE = "models/face_encodings.pkl"
+    MODEL_FILE = "models/lbph_model.yml"
+    LABELS_FILE = "models/labels.pkl"
     KNOWN_FACES_DIR = "dataset/known_faces"
-    TOLERANCE = 0.55  # lower = stricter matching
+    CONFIDENCE_THRESHOLD = 80  # lower = more strict
 
     def __init__(self):
-        self.known_encodings = []  # list of 128-d face encodings
-        self.known_names = []      # matching person names
-        self._load_encodings()
+        # LBPH recognizer is built into opencv-contrib-python
+        self.model = cv2.face.LBPHFaceRecognizer_create()
+        self.label_map = {}       # int -> name
+        self.reverse_map = {}     # name -> int
+        self.trained = False
+        self._load_or_train()
 
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
+    # ── Training ─────────────────────────────────────────────
 
-    def _load_encodings(self):
-        """Load pre-computed encodings from disk if available."""
-        if os.path.exists(self.ENCODINGS_FILE):
-            with open(self.ENCODINGS_FILE, "rb") as f:
+    def _load_or_train(self):
+        """Load saved model or train fresh from dataset/known_faces/."""
+        if os.path.exists(self.MODEL_FILE) and os.path.exists(self.LABELS_FILE):
+            self.model.read(self.MODEL_FILE)
+            with open(self.LABELS_FILE, "rb") as f:
                 data = pickle.load(f)
-                self.known_encodings = data.get("encodings", [])
-                self.known_names = data.get("names", [])
-            print(f"[FaceRecognizer] Loaded {len(self.known_names)} known faces from cache.")
+                self.label_map = data["label_map"]
+                self.reverse_map = data["reverse_map"]
+            self.trained = len(self.label_map) > 0
+            print(f"[FaceRecognizer] Loaded model — {len(self.label_map)} person(s).")
         else:
-            self._build_encodings_from_dataset()
+            self._train_from_dataset()
 
-    def save_encodings(self):
-        """Persist encodings to disk."""
-        os.makedirs("models", exist_ok=True)
-        with open(self.ENCODINGS_FILE, "wb") as f:
-            pickle.dump({"encodings": self.known_encodings, "names": self.known_names}, f)
-        print(f"[FaceRecognizer] Saved {len(self.known_names)} face encodings.")
-
-    # ------------------------------------------------------------------
-    # Dataset loading
-    # ------------------------------------------------------------------
-
-    def _build_encodings_from_dataset(self):
-        """
-        Scan dataset/known_faces/<PersonName>/<image>.jpg and build encodings.
-        Folder structure:
-            known_faces/
-                John_Doe/
-                    photo1.jpg
-                    photo2.jpg
-                Jane_Smith/
-                    photo1.jpg
-        """
-        if not FACE_RECOGNITION_AVAILABLE:
-            return
-        if not os.path.exists(self.KNOWN_FACES_DIR):
-            os.makedirs(self.KNOWN_FACES_DIR, exist_ok=True)
+    def _train_from_dataset(self):
+        """Scan known_faces/ folder and train LBPH model."""
+        faces_dir = self.KNOWN_FACES_DIR
+        if not os.path.exists(faces_dir):
+            os.makedirs(faces_dir, exist_ok=True)
             return
 
-        print("[FaceRecognizer] Building face encodings from dataset...")
-        count = 0
-        for person_name in os.listdir(self.KNOWN_FACES_DIR):
-            person_dir = os.path.join(self.KNOWN_FACES_DIR, person_name)
+        images = []
+        labels = []
+        label_id = 0
+
+        for person_name in sorted(os.listdir(faces_dir)):
+            person_dir = os.path.join(faces_dir, person_name)
             if not os.path.isdir(person_dir):
                 continue
+
+            self.label_map[label_id] = person_name
+            self.reverse_map[person_name] = label_id
+
             for img_file in os.listdir(person_dir):
                 if not img_file.lower().endswith((".jpg", ".jpeg", ".png")):
                     continue
                 img_path = os.path.join(person_dir, img_file)
-                image = face_recognition.load_image_file(img_path)
-                encodings = face_recognition.face_encodings(image)
-                if encodings:
-                    self.known_encodings.append(encodings[0])
-                    self.known_names.append(person_name)
-                    count += 1
-        print(f"[FaceRecognizer] Encoded {count} images for {len(set(self.known_names))} persons.")
-        if count > 0:
-            self.save_encodings()
+                img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+                if img is None:
+                    continue
+                img = cv2.resize(img, (100, 100))
+                images.append(img)
+                labels.append(label_id)
 
-    # ------------------------------------------------------------------
-    # Registration
-    # ------------------------------------------------------------------
+            label_id += 1
 
-    def register_face(self, frame, name):
+        if len(images) == 0:
+            print("[FaceRecognizer] No training images found.")
+            return
+
+        self.model.train(images, np.array(labels))
+        self._save_model()
+        self.trained = True
+        print(f"[FaceRecognizer] Trained on {len(images)} images for {label_id} person(s).")
+
+    def _save_model(self):
+        os.makedirs("models", exist_ok=True)
+        self.model.save(self.MODEL_FILE)
+        with open(self.LABELS_FILE, "wb") as f:
+            pickle.dump({"label_map": self.label_map, "reverse_map": self.reverse_map}, f)
+
+    # ── Registration ──────────────────────────────────────────
+
+    def register_face(self, gray_face, name):
         """
-        Register a new face from a BGR frame captured via webcam.
-        Saves the image and updates encodings in real-time.
+        Add a new face (grayscale 100x100 crop) to the database and retrain.
+        Returns (success, message).
         """
-        if not FACE_RECOGNITION_AVAILABLE:
-            return False, "face_recognition library not available."
-
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        encodings = face_recognition.face_encodings(rgb)
-        if not encodings:
-            return False, "No face detected in the frame."
-
-        # Save image
         person_dir = os.path.join(self.KNOWN_FACES_DIR, name)
         os.makedirs(person_dir, exist_ok=True)
-        img_count = len(os.listdir(person_dir)) + 1
-        img_path = os.path.join(person_dir, f"{name}_{img_count:03d}.jpg")
-        cv2.imwrite(img_path, frame)
 
-        self.known_encodings.append(encodings[0])
-        self.known_names.append(name)
-        self.save_encodings()
-        return True, f"Registered {name} successfully."
+        count = len([f for f in os.listdir(person_dir) if f.endswith(".jpg")])
+        img_path = os.path.join(person_dir, f"{name}_{count + 1:03d}.jpg")
+        face_resized = cv2.resize(gray_face, (100, 100))
+        cv2.imwrite(img_path, face_resized)
 
-    # ------------------------------------------------------------------
-    # Recognition
-    # ------------------------------------------------------------------
+        # Retrain with new data
+        self.label_map = {}
+        self.reverse_map = {}
+        self.trained = False
+        self._train_from_dataset()
+        return True, f"Registered '{name}' ({count + 1} photo)."
 
-    def recognize(self, frame, face_locations=None):
+    # ── Recognition ──────────────────────────────────────────
+
+    def predict(self, gray_face):
         """
-        Recognize faces in a BGR frame.
-        Returns list of dicts: {name, confidence, location}
-        location = (top, right, bottom, left) in CSS order (face_recognition style)
+        Predict who a face belongs to.
+        Returns (name, confidence_percent).
+        confidence_percent: 100 = perfect match, 0 = no match.
         """
-        if not FACE_RECOGNITION_AVAILABLE or not self.known_encodings:
-            return []
+        if not self.trained:
+            return "Unknown", 0
 
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        face_resized = cv2.resize(gray_face, (100, 100))
+        label_id, distance = self.model.predict(face_resized)
 
-        # Detect face locations if not provided (faster to pass from detector)
-        if face_locations is None:
-            face_locations = face_recognition.face_locations(rgb, model="hog")
+        # LBPH distance: 0 = perfect, >100 = bad. Convert to 0-100% confidence.
+        confidence = max(0, int(100 - distance))
 
-        if not face_locations:
-            return []
+        if distance > self.CONFIDENCE_THRESHOLD:
+            return "Unknown", confidence
 
-        face_encodings = face_recognition.face_encodings(rgb, face_locations)
-        results = []
-
-        for encoding, location in zip(face_encodings, face_locations):
-            distances = face_recognition.face_distance(self.known_encodings, encoding)
-            best_idx = int(np.argmin(distances))
-            best_dist = distances[best_idx]
-            confidence = round((1 - best_dist) * 100, 1)
-
-            if best_dist <= self.TOLERANCE:
-                name = self.known_names[best_idx]
-            else:
-                name = "Unknown"
-                confidence = round(best_dist * 100, 1)  # show distance as "uncertainty"
-
-            results.append({
-                "name": name,
-                "confidence": confidence,
-                "location": location,  # (top, right, bottom, left)
-                "distance": float(best_dist),
-            })
-
-        return results
+        name = self.label_map.get(label_id, "Unknown")
+        return name, confidence
 
     def reload(self):
-        """Force reload encodings from disk."""
-        self.known_encodings = []
-        self.known_names = []
-        self._load_encodings()
+        """Reload model from disk."""
+        self.label_map = {}
+        self.reverse_map = {}
+        self.trained = False
+        self._load_or_train()
 
     @property
-    def known_person_count(self):
-        return len(set(self.known_names))
+    def person_count(self):
+        return len(self.label_map)

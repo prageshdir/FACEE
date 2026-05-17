@@ -1,69 +1,60 @@
 """
-Motion Detector Module
-Uses background subtraction (MOG2) to detect moving persons in video.
-Returns contours of moving regions for further gait analysis.
+Motion Detector
+Uses MOG2 background subtraction to find moving people in the frame.
+MOG2 is built into OpenCV — no extra install needed.
 """
 
 import cv2
-import numpy as np
 
 
 class MotionDetector:
-    def __init__(self, history=200, var_threshold=50, detect_shadows=True):
-        # MOG2 background subtractor — good balance of speed vs accuracy
+    def __init__(self):
+        # MOG2 = Mixture of Gaussians background model
         self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=history,
-            varThreshold=var_threshold,
-            detectShadows=detect_shadows,
+            history=300,
+            varThreshold=50,
+            detectShadows=True
         )
-        # Morphological kernel to clean noise
         self.kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        self.min_area = 3000  # ignore small blobs (noise)
 
-    def get_foreground_mask(self, frame):
-        """Return cleaned binary mask of moving objects."""
-        fg_mask = self.bg_subtractor.apply(frame)
-        # Remove shadows (gray pixels set to 0)
-        _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
-        # Morphological opening to remove noise, then dilation to fill gaps
-        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, self.kernel, iterations=2)
-        fg_mask = cv2.dilate(fg_mask, self.kernel, iterations=2)
-        return fg_mask
+    def detect(self, frame):
+        """
+        Find moving regions in the frame.
+        Returns list of person dicts: {bbox, centroid, area}
+        """
+        # Get foreground mask (white = moving, black = background)
+        mask = self.bg_subtractor.apply(frame)
 
-    def detect_persons(self, frame):
-        """
-        Detect moving person regions.
-        Returns list of dicts: {bbox, area, contour, centroid}
-        bbox = (x, y, w, h)
-        """
-        fg_mask = self.get_foreground_mask(frame)
-        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Remove shadow pixels (value 127) — keep only full motion (255)
+        _, mask = cv2.threshold(mask, 200, 255, cv2.THRESH_BINARY)
+
+        # Clean up noise
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel, iterations=2)
+        mask = cv2.dilate(mask, self.kernel, iterations=3)
+
+        # Find contours (blobs of motion)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         persons = []
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            if area < self.min_area:
+            if area < 3000:   # ignore small blobs
                 continue
+
             x, y, w, h = cv2.boundingRect(cnt)
-            # Basic aspect ratio filter: a standing person is taller than wide
-            aspect = h / (w + 1e-5)
-            if aspect < 0.8:
+
+            # A standing person should be taller than wide
+            if h < w * 0.8:
                 continue
-            M = cv2.moments(cnt)
-            cx = int(M["m10"] / (M["m00"] + 1e-5))
-            cy = int(M["m01"] / (M["m00"] + 1e-5))
+
+            # Centroid of the blob
+            cx = x + w // 2
+            cy = y + h // 2
+
             persons.append({
                 "bbox": (x, y, w, h),
-                "area": area,
-                "contour": cnt,
                 "centroid": (cx, cy),
+                "area": area
             })
 
-        return persons, fg_mask
-
-    def draw_person_boxes(self, frame, persons, color=(255, 165, 0)):
-        """Draw orange bounding boxes around detected persons."""
-        for p in persons:
-            x, y, w, h = p["bbox"]
-            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-        return frame
+        return persons, mask

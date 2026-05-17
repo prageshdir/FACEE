@@ -1,217 +1,172 @@
-# Deep Learning Based Face and Gait Recognition Using Surveillance Camera
-
-**MCA Major Project**
-
----
-
-## Overview
-
-A real-time surveillance system that:
-- Detects and recognizes faces from a webcam/CCTV feed
-- Analyzes human walking patterns (gait) using motion tracking
-- Displays person identity, confidence score, and gait status live
-- Logs all recognition events with timestamps
+# Face & Gait Recognition — Surveillance System
+### MCA Major Project
 
 ---
 
-## Project Structure
+## HOW TO RUN ON WINDOWS (Step by Step)
+
+### Step 1 — Download this project
+
+If you downloaded a ZIP, extract it to a folder like:
+```
+C:\Users\YourName\Desktop\FACEE
+```
+
+---
+
+### Step 2 — Open Command Prompt in the project folder
+
+1. Open the `FACEE` folder in File Explorer
+2. Click in the address bar at the top
+3. Type `cmd` and press **Enter**
+4. A black Command Prompt window opens in that folder
+
+---
+
+### Step 3 — Install the required libraries
+
+Copy and paste this command into the Command Prompt, then press **Enter**:
+
+```
+pip install opencv-contrib-python numpy Pillow
+```
+
+Wait for it to finish (may take 1–2 minutes).
+
+---
+
+### Step 4 — Run the app
+
+```
+python app.py
+```
+
+A window will open with the camera feed and controls.
+
+---
+
+## HOW TO USE THE APP
+
+### Start the camera
+Click **▶ Start Camera** — your webcam turns on.
+
+### Register your face (first time only)
+1. Sit in front of the webcam
+2. Click **📸 Register My Face**
+3. Type your name and press OK
+4. Your face is now saved — the app will recognize you next time
+
+### What you will see on screen
+| Box Color | Meaning |
+|-----------|---------|
+| Green box | Recognized person + name + confidence % |
+| Red box   | Unknown person |
+| Orange box | Detected moving person (gait tracking) |
+| Cyan text | Walking / Running / Standing + score |
+
+### Recognition Log
+Every time a face is recognized, it is saved automatically to:
+```
+logs/recognition_log.csv
+```
+You can open this file in Excel.
+
+---
+
+## TROUBLESHOOTING
+
+**"Cannot open camera" error**
+- Make sure your webcam is plugged in
+- Open `app.py` in Notepad and change `CAMERA_INDEX = 0` to `CAMERA_INDEX = 1`
+
+**"ModuleNotFoundError" error**
+- Run Step 3 again: `pip install opencv-contrib-python numpy Pillow`
+
+**Python not recognized**
+- Download Python from https://www.python.org/downloads/
+- During install, check the box **"Add Python to PATH"**
+
+**App opens but webcam is black/frozen**
+- Try unplugging and replugging the webcam
+- Close other apps using the camera (Zoom, Teams, etc.)
+
+---
+
+## PROJECT STRUCTURE
 
 ```
 FACEE/
 │
-├── app.py                  ← Main application (run this)
-├── download_dataset.py     ← Download LFW dataset via Kaggle
-├── add_sample_faces.py     ← Register faces via webcam
-├── requirements.txt
+├── app.py                  ← Main file — run this
+├── requirements.txt        ← Library list
 │
 ├── face_module/
-│   ├── face_detector.py    ← Haar Cascade face detection
-│   └── face_recognizer.py  ← face_recognition encoding & matching
+│   ├── face_detector.py    ← Detects face location (Haar Cascade)
+│   └── face_recognizer.py  ← Recognizes who it is (LBPH algorithm)
 │
 ├── gait_module/
-│   ├── motion_detector.py  ← MOG2 background subtraction
-│   └── gait_analyzer.py    ← Centroid tracking + pattern analysis
+│   ├── motion_detector.py  ← Detects moving persons (MOG2)
+│   └── gait_analyzer.py    ← Classifies walking pattern
 │
 ├── utils/
-│   ├── logger.py           ← CSV event logger
-│   └── helpers.py          ← Drawing utilities
+│   ├── logger.py           ← Saves recognition events to CSV
+│   └── helpers.py          ← Drawing functions
 │
 ├── dataset/
-│   ├── known_faces/        ← Person photos (auto-loaded on start)
-│   └── gait_data/          ← Gait dataset (optional)
+│   └── known_faces/        ← Your registered face photos go here
 │
-├── models/                 ← Saved face encodings (auto-generated)
-├── logs/                   ← recognition_log.csv
-└── screenshots/            ← Saved frames
+├── models/                 ← Trained model saved here automatically
+├── logs/                   ← recognition_log.csv saved here
+└── screenshots/            ← Screenshots saved here
 ```
 
 ---
 
-## Installation
+## HOW IT WORKS (for viva)
 
-### 1. Create a virtual environment (recommended)
-
-```bash
-python -m venv venv
-# Windows:
-venv\Scripts\activate
-# Linux/macOS:
-source venv/bin/activate
-```
-
-### 2. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-> **Note:** `dlib` (required by `face_recognition`) may need build tools.
-> - **Windows:** Install Visual Studio Build Tools first.
-> - **Ubuntu/Debian:** `sudo apt install build-essential cmake`
-> - **macOS:** `xcode-select --install`
-
-### 3. Add known faces
-
-**Option A — Webcam capture (easiest)**
-```bash
-python add_sample_faces.py
-```
-Follow the on-screen prompts to capture photos of each person.
-
-**Option B — Use LFW dataset (Kaggle)**
-```bash
-# Set up Kaggle credentials first: https://www.kaggle.com/docs/api
-python download_dataset.py
-```
-
-**Option C — Manual**
-```
-dataset/
-  known_faces/
-    John_Doe/
-      photo1.jpg
-      photo2.jpg
-    Jane_Smith/
-      photo1.jpg
-```
-
-### 4. Run the application
-
-```bash
-python app.py
-```
-
----
-
-## How It Works
+### Face Detection
+Uses **Haar Cascade** — a pre-trained classifier built into OpenCV.
+It scans the frame at multiple scales looking for face-like patterns.
 
 ### Face Recognition
-
-| Step | Method |
-|------|--------|
-| Detection | OpenCV Haar Cascade (`haarcascade_frontalface_default.xml`) |
-| Encoding | 128-dimensional face embeddings via `face_recognition` (dlib FaceNet) |
-| Matching | Euclidean distance with configurable tolerance (default 0.55) |
-| Database | Pickle file (`models/face_encodings.pkl`) — auto-rebuilt when new images added |
+Uses **LBPH (Local Binary Pattern Histograms)** — also built into OpenCV.
+- Each face is described as a pattern of pixel intensities
+- When a new face appears, it compares the pattern to all stored faces
+- Returns the closest match + a confidence score
 
 ### Gait Detection
-
-| Step | Method |
-|------|--------|
-| Foreground extraction | MOG2 background subtractor |
-| Person detection | Contour analysis + aspect ratio filter |
-| Tracking | Centroid-based nearest-neighbor matching |
-| Pattern analysis | Lateral oscillation + speed measurement |
-| Classification | Standing / Walking / Running |
+Uses **MOG2 (Mixture of Gaussians)** background subtraction:
+- Learns what the background looks like over 300 frames
+- Anything that moves becomes a white blob in the foreground mask
+- Blobs big enough to be a person are tracked frame-to-frame
+- Speed of centroid movement determines: Standing / Walking / Running
 
 ---
 
-## GUI Features
+## VIVA Q&A
 
-| Button | Action |
-|--------|--------|
-| ▶ Start Camera | Opens webcam and starts detection |
-| ■ Stop Camera | Stops video feed |
-| 📸 Register New Face | Capture current frame and save as new person |
-| 💾 Save Screenshot | Save annotated frame to screenshots/ |
-| 🔄 Reload Face DB | Reload faces from disk without restarting |
-| 🗑️ Clear Log | Clear recognition log panel |
+**Q: What algorithm is used for face recognition?**
+A: LBPH (Local Binary Pattern Histograms). It divides the face into small cells and creates a histogram of pixel patterns. Recognition is done by comparing histograms.
 
----
+**Q: How does gait detection work without a special sensor?**
+A: We use background subtraction (MOG2) to isolate moving foreground objects from a static camera. Human silhouettes are extracted using contour detection, then their centroid is tracked across frames. The speed and oscillation of the centroid classifies the gait.
 
-## Output Display
+**Q: What is the difference between detection and recognition?**
+A: Detection finds WHERE a face is in the image (gives a bounding box). Recognition identifies WHO that face belongs to (gives a name and confidence score).
 
-Each frame shows:
-- **Green box** — recognized person with name + confidence %
-- **Red box** — unknown person
-- **Orange box** — detected moving person (gait tracking)
-- **Cyan text** — gait classification + score
-- **FPS counter** — top-left
-- **Timestamp** — bottom-left
+**Q: What datasets can be used?**
+A: LFW (Labeled Faces in the Wild) from Kaggle for pre-labeled images. Or custom images captured via webcam using the Register button.
+
+**Q: What is confidence score?**
+A: LBPH gives a distance value — how different the detected face is from stored faces. We convert this to a percentage: 100% = perfect match, 0% = completely different.
 
 ---
 
-## Configuration
+## Libraries Used
 
-Edit constants at the top of `app.py`:
-
-```python
-CAMERA_INDEX = 0       # 0=built-in webcam, 1=external camera
-LOG_INTERVAL = 3       # seconds between duplicate log entries
-RECOGNITION_SCALE = 0  # scale factor for recognition (0.5 = 2× faster)
-```
-
-Edit tolerance in `face_module/face_recognizer.py`:
-```python
-TOLERANCE = 0.55       # lower = stricter (fewer false positives)
-```
-
----
-
-## Dataset Links
-
-| Dataset | URL | Use |
-|---------|-----|-----|
-| LFW (Labeled Faces in the Wild) | https://www.kaggle.com/datasets/jessicali9530/lfw-dataset | Face recognition |
-| CASIA Gait Dataset B | https://www.kaggle.com/datasets/mohamedhanyyy/gaitb | Gait analysis |
-| Face Recognition Dataset | https://www.kaggle.com/datasets/vasukipatel/face-recognition-dataset | Face recognition |
-
----
-
-## Viva Preparation
-
-**Q: What deep learning technique is used for face recognition?**
-A: FaceNet-based deep convolutional network (via dlib) that maps each face to a 128-dimensional embedding vector. Matching uses Euclidean distance between embeddings.
-
-**Q: How does gait detection work?**
-A: Background subtraction (MOG2 algorithm) isolates moving foreground. Person contours are extracted and tracked frame-to-frame by centroid proximity. Speed and stride oscillation frequency classify the gait pattern.
-
-**Q: What is the difference between face detection and recognition?**
-A: Detection locates faces in the image (bounding box). Recognition identifies *who* the detected face belongs to by comparing its embedding to a database.
-
-**Q: Which datasets were used?**
-A: LFW (Labeled Faces in the Wild) for face recognition — 13,000+ labeled images of public figures. Custom webcam images for personalized recognition.
-
-**Q: How is this suitable for real surveillance?**
-A: The system processes each frame in real-time, handles multiple persons simultaneously, handles unknown person detection and logging. In a real deployment, camera feeds would be accessed over RTSP and the face database would be larger.
-
----
-
-## Tech Stack Summary
-
-| Component | Technology |
-|-----------|-----------|
-| Language | Python 3.8+ |
-| GUI | Tkinter |
-| Video capture | OpenCV |
-| Face detection | Haar Cascade (OpenCV) |
-| Face recognition | face_recognition (dlib/FaceNet) |
-| Motion detection | MOG2 background subtraction |
-| Gait analysis | Centroid tracking + signal analysis |
-| Logging | CSV + in-memory |
-
----
-
-## License
-
-This project is for academic/educational purposes.
+| Library | Purpose | Install |
+|---------|---------|---------|
+| opencv-contrib-python | Face detection, recognition, motion | `pip install opencv-contrib-python` |
+| numpy | Array operations | `pip install numpy` |
+| Pillow | Display images in Tkinter GUI | `pip install Pillow` |
+| tkinter | GUI window (built into Python) | already installed |

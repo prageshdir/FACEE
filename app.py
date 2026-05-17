@@ -2,11 +2,14 @@
 Deep Learning Based Face and Gait Recognition Using Surveillance Camera
 MCA Major Project
 
-Main Application — Tkinter GUI + OpenCV camera pipeline
+HOW TO RUN:
+  1. Open Command Prompt (CMD)
+  2. Go to this folder:  cd path\to\FACEE
+  3. Install libraries:  pip install -r requirements.txt
+  4. Run the app:        python app.py
 """
 
 import os
-import sys
 import time
 import threading
 import tkinter as tk
@@ -17,391 +20,297 @@ import numpy as np
 
 from face_module import FaceDetector, FaceRecognizer
 from gait_module import MotionDetector, GaitAnalyzer
-from utils import RecognitionLogger, draw_face_result, draw_timestamp, save_screenshot, resize_frame
+from utils import RecognitionLogger, draw_box, draw_timestamp, save_screenshot
 
 
-# ──────────────────────────────────────────────
-# Constants
-# ──────────────────────────────────────────────
-WINDOW_TITLE = "Face & Gait Recognition — Surveillance System"
-CAMERA_INDEX = 0          # 0 = built-in webcam, change for external camera
-DISPLAY_WIDTH = 640
-DISPLAY_HEIGHT = 480
-LOG_INTERVAL = 3          # seconds between duplicate log entries per person
-RECOGNITION_SCALE = 0.5   # scale down frame for faster recognition
+# ── Settings (change these if needed) ──────────────────────
+CAMERA_INDEX   = 0      # 0 = first webcam, try 1 if webcam not found
+LOG_COOLDOWN   = 4      # seconds between repeated log entries per person
+# ────────────────────────────────────────────────────────────
 
-
-# ──────────────────────────────────────────────
-# Processing Pipeline
-# ──────────────────────────────────────────────
-
-class SurveillancePipeline:
-    """Encapsulates all AI processing (runs in background thread)."""
-
-    def __init__(self):
-        self.face_detector = FaceDetector()
-        self.face_recognizer = FaceRecognizer()
-        self.motion_detector = MotionDetector()
-        self.gait_analyzer = GaitAnalyzer()
-        self.logger = RecognitionLogger()
-
-        self._last_log_time = {}   # name -> last log timestamp
-        self._result_lock = threading.Lock()
-        self._latest_results = {
-            "face_results": [],
-            "gait_results": [],
-            "fps": 0.0,
-        }
-
-    def process_frame(self, frame):
-        """Run full detection + recognition pipeline on one frame."""
-        t0 = time.time()
-
-        # --- Face recognition on a down-scaled copy ---
-        small = cv2.resize(frame, (0, 0), fx=RECOGNITION_SCALE, fy=RECOGNITION_SCALE)
-        face_results = self.face_recognizer.recognize(small)
-
-        # Scale bounding locations back to original size
-        inv = 1.0 / RECOGNITION_SCALE
-        scaled_face_results = []
-        for r in face_results:
-            top, right, bottom, left = r["location"]
-            r["location"] = (
-                int(top * inv), int(right * inv),
-                int(bottom * inv), int(left * inv),
-            )
-            scaled_face_results.append(r)
-
-        # --- Gait / motion detection ---
-        persons, fg_mask = self.motion_detector.detect_persons(frame)
-        gait_results = self.gait_analyzer.update(persons)
-
-        fps = 1.0 / (time.time() - t0 + 1e-6)
-
-        # --- Logging (throttled) ---
-        now = time.time()
-        for r in scaled_face_results:
-            name = r["name"]
-            last = self._last_log_time.get(name, 0)
-            if now - last >= LOG_INTERVAL:
-                gait_label = gait_results[0]["gait_label"] if gait_results else "N/A"
-                gait_score = gait_results[0]["gait_score"] if gait_results else 0
-                self.logger.log(name, r["confidence"], gait_label, gait_score)
-                self._last_log_time[name] = now
-
-        with self._result_lock:
-            self._latest_results = {
-                "face_results": scaled_face_results,
-                "gait_results": gait_results,
-                "fps": fps,
-                "fg_mask": fg_mask,
-            }
-        return scaled_face_results, gait_results
-
-    def get_latest_results(self):
-        with self._result_lock:
-            return dict(self._latest_results)
-
-
-# ──────────────────────────────────────────────
-# GUI Application
-# ──────────────────────────────────────────────
 
 class App(tk.Tk):
+    """Main application window."""
+
     def __init__(self):
         super().__init__()
-        self.title(WINDOW_TITLE)
-        self.resizable(True, True)
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.title("Face & Gait Recognition — Surveillance System")
+        self.configure(bg="#1a1a2e")
+        self.protocol("WM_DELETE_WINDOW", self._quit)
 
-        self.pipeline = SurveillancePipeline()
-        self.cap = None
-        self._running = False
-        self._thread = None
+        # AI modules
+        self.detector   = FaceDetector()
+        self.recognizer = FaceRecognizer()
+        self.motion     = MotionDetector()
+        self.gait       = GaitAnalyzer()
+        self.logger     = RecognitionLogger()
+
+        # State
+        self.cap            = None
+        self.running        = False
+        self.current_frame  = None        # latest annotated frame (BGR)
+        self._last_log      = {}          # name -> last log time
 
         self._build_ui()
-        self._update_log_panel()
+        self._refresh_log()
 
-    # ------------------------------------------------------------------
-    # UI Construction
-    # ------------------------------------------------------------------
+    # ─────────────────────────────────────────
+    # UI Layout
+    # ─────────────────────────────────────────
 
     def _build_ui(self):
-        # ── Top bar ──
-        top = tk.Frame(self, bg="#1e1e2e", pady=4)
-        top.pack(fill=tk.X)
-        tk.Label(
-            top,
-            text="  Face & Gait Surveillance System",
-            bg="#1e1e2e", fg="#cdd6f4",
-            font=("Helvetica", 14, "bold"),
-        ).pack(side=tk.LEFT, padx=8)
+        # ── Title bar ──
+        bar = tk.Frame(self, bg="#16213e", pady=6)
+        bar.pack(fill=tk.X)
+        tk.Label(bar, text="  Face & Gait Surveillance System",
+                 bg="#16213e", fg="#e2e2e2",
+                 font=("Segoe UI", 13, "bold")).pack(side=tk.LEFT, padx=8)
 
-        self._known_label = tk.Label(
-            top, text="Known Persons: 0",
-            bg="#1e1e2e", fg="#a6e3a1",
-            font=("Helvetica", 10),
-        )
-        self._known_label.pack(side=tk.RIGHT, padx=12)
+        self._persons_lbl = tk.Label(bar, text="Persons in DB: 0",
+                                     bg="#16213e", fg="#4ecca3",
+                                     font=("Segoe UI", 9))
+        self._persons_lbl.pack(side=tk.RIGHT, padx=12)
 
-        # ── Main content (left = video, right = panel) ──
-        main = tk.Frame(self, bg="#181825")
-        main.pack(fill=tk.BOTH, expand=True)
+        # ── Body: video feed (left) + controls (right) ──
+        body = tk.Frame(self, bg="#1a1a2e")
+        body.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-        # Left: camera feed
-        left_col = tk.Frame(main, bg="#181825")
-        left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=8, pady=8)
+        # Left: video
+        left = tk.Frame(body, bg="#1a1a2e")
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self._video_canvas = tk.Label(left_col, bg="#000000")
-        self._video_canvas.pack(fill=tk.BOTH, expand=True)
+        self._canvas = tk.Label(left, bg="#000", width=640, height=480)
+        self._canvas.pack()
 
-        self._status_var = tk.StringVar(value="Camera stopped")
-        tk.Label(
-            left_col, textvariable=self._status_var,
-            bg="#181825", fg="#89b4fa",
-            font=("Helvetica", 9),
-        ).pack(pady=(2, 0))
+        self._status = tk.StringVar(value="Camera is stopped.  Press  ▶ Start  to begin.")
+        tk.Label(left, textvariable=self._status,
+                 bg="#1a1a2e", fg="#a0a0c0",
+                 font=("Segoe UI", 9)).pack(pady=(4, 0))
 
         # Right: controls + log
-        right_col = tk.Frame(main, bg="#181825", width=260)
-        right_col.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 8), pady=8)
-        right_col.pack_propagate(False)
+        right = tk.Frame(body, bg="#1a1a2e", width=220)
+        right.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        right.pack_propagate(False)
 
-        self._build_controls(right_col)
-        self._build_log_panel(right_col)
+        self._build_buttons(right)
+        self._build_log_panel(right)
 
-        # ── Bottom bar ──
-        bottom = tk.Frame(self, bg="#1e1e2e", pady=3)
-        bottom.pack(fill=tk.X, side=tk.BOTTOM)
-        tk.Label(
-            bottom,
-            text="MCA Major Project  |  Face & Gait Recognition",
-            bg="#1e1e2e", fg="#6c7086",
-            font=("Helvetica", 8),
-        ).pack()
+        # ── Footer ──
+        tk.Label(self,
+                 text="MCA Major Project  |  OpenCV + LBPH + MOG2",
+                 bg="#1a1a2e", fg="#444466",
+                 font=("Segoe UI", 8)).pack(pady=(0, 4))
 
-    def _build_controls(self, parent):
-        tk.Label(
-            parent, text="Controls", bg="#181825", fg="#cdd6f4",
-            font=("Helvetica", 11, "bold"),
-        ).pack(pady=(0, 6))
+    def _build_buttons(self, parent):
+        tk.Label(parent, text="Controls",
+                 bg="#1a1a2e", fg="#e2e2e2",
+                 font=("Segoe UI", 10, "bold")).pack(pady=(4, 8))
 
-        btn_cfg = dict(width=22, font=("Helvetica", 9, "bold"), relief=tk.FLAT, bd=0, pady=6)
+        def btn(text, color, cmd, **kw):
+            b = tk.Button(parent, text=text, bg=color, fg="#1a1a2e",
+                          font=("Segoe UI", 9, "bold"),
+                          relief=tk.FLAT, bd=0, pady=7, width=22,
+                          command=cmd, **kw)
+            b.pack(pady=3)
+            return b
 
-        self._btn_start = tk.Button(
-            parent, text="▶  Start Camera",
-            bg="#a6e3a1", fg="#1e1e2e",
-            command=self._start_camera, **btn_cfg,
-        )
-        self._btn_start.pack(pady=3)
+        self._btn_start = btn("▶  Start Camera",  "#4ecca3", self._start)
+        self._btn_stop  = btn("■  Stop Camera",   "#ff6b6b", self._stop, state=tk.DISABLED)
+        btn("📸  Register My Face",  "#ffd166", self._register)
+        btn("💾  Screenshot",        "#a29bfe", self._screenshot)
+        btn("🔄  Reload Face DB",    "#74b9ff", self._reload_db)
+        btn("🗑  Clear Log",         "#636e72", self._clear_log)
 
-        self._btn_stop = tk.Button(
-            parent, text="■  Stop Camera",
-            bg="#f38ba8", fg="#1e1e2e",
-            command=self._stop_camera, state=tk.DISABLED, **btn_cfg,
-        )
-        self._btn_stop.pack(pady=3)
-
-        tk.Button(
-            parent, text="📸  Register New Face",
-            bg="#89dceb", fg="#1e1e2e",
-            command=self._register_face, **btn_cfg,
-        ).pack(pady=3)
-
-        tk.Button(
-            parent, text="💾  Save Screenshot",
-            bg="#cba6f7", fg="#1e1e2e",
-            command=self._save_screenshot, **btn_cfg,
-        ).pack(pady=3)
-
-        tk.Button(
-            parent, text="🔄  Reload Face DB",
-            bg="#fab387", fg="#1e1e2e",
-            command=self._reload_db, **btn_cfg,
-        ).pack(pady=3)
-
-        tk.Button(
-            parent, text="🗑️  Clear Log",
-            bg="#6c7086", fg="#cdd6f4",
-            command=self._clear_log, **btn_cfg,
-        ).pack(pady=3)
-
-        # FPS indicator
-        self._fps_var = tk.StringVar(value="FPS: --")
-        tk.Label(
-            parent, textvariable=self._fps_var,
-            bg="#181825", fg="#f9e2af",
-            font=("Helvetica", 9),
-        ).pack(pady=(8, 2))
+        self._fps_lbl = tk.Label(parent, text="FPS: --",
+                                 bg="#1a1a2e", fg="#ffd166",
+                                 font=("Segoe UI", 9))
+        self._fps_lbl.pack(pady=(10, 0))
 
     def _build_log_panel(self, parent):
-        tk.Label(
-            parent, text="Recognition Log",
-            bg="#181825", fg="#cdd6f4",
-            font=("Helvetica", 10, "bold"),
-        ).pack(pady=(12, 4))
+        tk.Label(parent, text="Recognition Log",
+                 bg="#1a1a2e", fg="#e2e2e2",
+                 font=("Segoe UI", 10, "bold")).pack(pady=(14, 4))
 
-        frame = tk.Frame(parent, bg="#181825")
+        frame = tk.Frame(parent, bg="#1a1a2e")
         frame.pack(fill=tk.BOTH, expand=True)
 
-        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL)
-        self._log_list = tk.Listbox(
-            frame,
-            yscrollcommand=scrollbar.set,
-            bg="#313244", fg="#cdd6f4",
-            font=("Courier", 8),
-            selectmode=tk.SINGLE,
-            relief=tk.FLAT,
-            bd=0,
-        )
-        scrollbar.config(command=self._log_list.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self._log_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb = ttk.Scrollbar(frame)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
 
-    # ------------------------------------------------------------------
+        self._log_box = tk.Listbox(frame, yscrollcommand=sb.set,
+                                   bg="#0f3460", fg="#e2e2e2",
+                                   font=("Courier New", 8),
+                                   relief=tk.FLAT, bd=0,
+                                   selectmode=tk.SINGLE)
+        self._log_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.config(command=self._log_box.yview)
+
+    # ─────────────────────────────────────────
     # Camera thread
-    # ------------------------------------------------------------------
+    # ─────────────────────────────────────────
 
-    def _start_camera(self):
-        if self._running:
-            return
-        self.cap = cv2.VideoCapture(CAMERA_INDEX)
+    def _start(self):
+        self.cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)  # CAP_DSHOW faster on Windows
         if not self.cap.isOpened():
-            messagebox.showerror("Camera Error", f"Cannot open camera index {CAMERA_INDEX}.\n"
-                                 "Check your webcam connection.")
+            messagebox.showerror("Camera Error",
+                                 f"Cannot open camera {CAMERA_INDEX}.\n\n"
+                                 "• Make sure your webcam is plugged in.\n"
+                                 "• Try changing CAMERA_INDEX = 1 in app.py")
             return
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, DISPLAY_WIDTH)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, DISPLAY_HEIGHT)
 
-        self._running = True
+        self.running = True
         self._btn_start.config(state=tk.DISABLED)
         self._btn_stop.config(state=tk.NORMAL)
-        self._status_var.set("Camera running…")
+        self._status.set("Camera running…")
 
-        self._thread = threading.Thread(target=self._camera_loop, daemon=True)
-        self._thread.start()
-        self._poll_frame()
+        # Run camera loop in a background thread so GUI doesn't freeze
+        threading.Thread(target=self._camera_loop, daemon=True).start()
+        self._show_frame()   # start GUI refresh loop
 
-    def _stop_camera(self):
-        self._running = False
-        self._btn_start.config(state=tk.NORMAL)
-        self._btn_stop.config(state=tk.DISABLED)
-        self._status_var.set("Camera stopped")
+    def _stop(self):
+        self.running = False
         if self.cap:
             self.cap.release()
             self.cap = None
+        self._btn_start.config(state=tk.NORMAL)
+        self._btn_stop.config(state=tk.DISABLED)
+        self._status.set("Camera stopped.")
 
     def _camera_loop(self):
-        """Background thread: reads frames and runs AI pipeline."""
-        while self._running:
-            if self.cap is None or not self.cap.isOpened():
+        """Runs in background thread. Reads frames and runs AI."""
+        fps_timer = time.time()
+        frame_count = 0
+
+        while self.running:
+            if self.cap is None:
                 break
-            ret, frame = self.cap.read()
-            if not ret:
+            ok, frame = self.cap.read()
+            if not ok:
                 time.sleep(0.01)
                 continue
-            face_results, gait_results = self.pipeline.process_frame(frame)
 
-            # Annotate frame
-            for r in face_results:
-                draw_face_result(frame, r)
+            # ── Step 1: Detect faces ──
+            face_boxes = self.detector.detect(frame)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            # ── Step 2: Recognize each face ──
+            for (x, y, w, h) in face_boxes:
+                face_crop = gray[y:y+h, x:x+w]          # crop grayscale face
+                name, conf = self.recognizer.predict(face_crop)
+
+                color = (50, 200, 50) if name != "Unknown" else (50, 50, 220)
+                label = f"{name}  {conf}%"
+                draw_box(frame, x, y, w, h, color, label)
+
+                # Log (but not too often for same person)
+                now = time.time()
+                if now - self._last_log.get(name, 0) > LOG_COOLDOWN:
+                    self._last_log[name] = now
+                    self.logger.log(name, conf)
+
+            # ── Step 3: Detect moving persons (gait) ──
+            persons, _ = self.motion.detect(frame)
+            gait_results = self.gait.update(persons)
+
             for g in gait_results:
                 x, y, w, h = g["bbox"]
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 165, 0), 2)
-                gait_text = f"{g['gait_label']} {g['gait_score']}%"
-                cv2.putText(frame, gait_text, (x, y - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
+                gait_label = f"{g['label']}  {g['score']}%"
+                # Orange box for gait tracking
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 165, 255), 2)
+                cv2.putText(frame, gait_label, (x, y + h + 18),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 200, 255), 2)
+
+            # ── Step 4: Overlay FPS + timestamp ──
+            frame_count += 1
+            elapsed = time.time() - fps_timer
+            if elapsed >= 1.0:
+                fps = frame_count / elapsed
+                frame_count = 0
+                fps_timer = time.time()
+                self._fps_lbl.config(text=f"FPS: {fps:.1f}")
+
             draw_timestamp(frame)
+            self.current_frame = frame.copy()
 
-            # FPS overlay
-            fps = self.pipeline.get_latest_results().get("fps", 0)
-            cv2.putText(frame, f"FPS: {fps:.1f}", (10, 22),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    def _show_frame(self):
+        """Runs in GUI thread every 30ms — displays latest frame."""
+        if self.running and self.current_frame is not None:
+            rgb = cv2.cvtColor(self.current_frame, cv2.COLOR_BGR2RGB)
+            img = ImageTk.PhotoImage(Image.fromarray(rgb))
+            self._canvas.imgtk = img      # hold reference to prevent GC
+            self._canvas.config(image=img)
+            self._persons_lbl.config(text=f"Persons in DB: {self.recognizer.person_count}")
 
-            # Store annotated frame for GUI thread
-            self._current_frame = frame
+        if self.running:
+            self.after(30, self._show_frame)
 
-    def _poll_frame(self):
-        """GUI thread: refresh canvas from latest processed frame."""
-        if not self._running:
-            return
-
-        frame = getattr(self, "_current_frame", None)
-        if frame is not None:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(rgb)
-            imgtk = ImageTk.PhotoImage(image=img)
-            self._video_canvas.imgtk = imgtk
-            self._video_canvas.configure(image=imgtk)
-
-            fps = self.pipeline.get_latest_results().get("fps", 0)
-            self._fps_var.set(f"FPS: {fps:.1f}")
-            self._known_label.config(
-                text=f"Known Persons: {self.pipeline.face_recognizer.known_person_count}"
-            )
-
-        self.after(30, self._poll_frame)  # ~33 FPS GUI refresh
-
-    # ------------------------------------------------------------------
-    # Log panel refresh
-    # ------------------------------------------------------------------
-
-    def _update_log_panel(self):
-        entries = self.pipeline.logger.recent(30)
-        self._log_list.delete(0, tk.END)
-        for e in entries:
-            line = f"{e['timestamp'][-8:]}  {e['name']:<14} {e['gait']}"
-            color = "#f38ba8" if e["name"] == "Unknown" else "#a6e3a1"
-            self._log_list.insert(tk.END, line)
-            self._log_list.itemconfig(tk.END, fg=color)
-        self.after(2000, self._update_log_panel)  # refresh every 2s
-
-    # ------------------------------------------------------------------
+    # ─────────────────────────────────────────
     # Button actions
-    # ------------------------------------------------------------------
+    # ─────────────────────────────────────────
 
-    def _register_face(self):
-        """Capture current frame and register a new person."""
-        frame = getattr(self, "_current_frame", None)
-        if frame is None:
-            messagebox.showwarning("No Frame", "Start the camera first.")
+    def _register(self):
+        """Capture current frame and save face to database."""
+        if self.current_frame is None:
+            messagebox.showwarning("No Frame", "Start the camera first, then click Register.")
             return
-        name = simpledialog.askstring("Register Face", "Enter person's name:")
+
+        name = simpledialog.askstring("Register Face", "Enter your name:")
         if not name or not name.strip():
             return
         name = name.strip().replace(" ", "_")
-        ok, msg = self.pipeline.face_recognizer.register_face(frame.copy(), name)
+
+        # Detect face in current frame
+        gray = cv2.cvtColor(self.current_frame, cv2.COLOR_BGR2GRAY)
+        boxes = self.detector.detect(self.current_frame)
+
+        if not boxes:
+            messagebox.showerror("No Face Found",
+                                 "No face detected in the current frame.\n"
+                                 "Make sure your face is clearly visible.")
+            return
+
+        # Use the first (largest) detected face
+        x, y, w, h = max(boxes, key=lambda b: b[2] * b[3])
+        face_crop = gray[y:y+h, x:x+w]
+
+        ok, msg = self.recognizer.register_face(face_crop, name)
         if ok:
-            messagebox.showinfo("Success", msg)
+            messagebox.showinfo("Success! ✓", msg)
         else:
             messagebox.showerror("Failed", msg)
 
-    def _save_screenshot(self):
-        frame = getattr(self, "_current_frame", None)
-        if frame is None:
+    def _screenshot(self):
+        if self.current_frame is None:
             messagebox.showwarning("No Frame", "Start the camera first.")
             return
-        path = save_screenshot(frame)
-        messagebox.showinfo("Saved", f"Screenshot saved:\n{path}")
+        path = save_screenshot(self.current_frame)
+        messagebox.showinfo("Saved", f"Screenshot saved to:\n{path}")
 
     def _reload_db(self):
-        self.pipeline.face_recognizer.reload()
-        count = self.pipeline.face_recognizer.known_person_count
-        messagebox.showinfo("Reloaded", f"Face database reloaded.\n{count} person(s) loaded.")
+        self.recognizer.reload()
+        messagebox.showinfo("Reloaded",
+                            f"Face database reloaded.\n{self.recognizer.person_count} person(s) found.")
 
     def _clear_log(self):
-        self.pipeline.logger.clear_memory()
-        self._log_list.delete(0, tk.END)
+        self.logger.recent.clear()
+        self._log_box.delete(0, tk.END)
 
-    def _on_close(self):
-        self._stop_camera()
+    def _refresh_log(self):
+        """Update the log panel every 2 seconds."""
+        self._log_box.delete(0, tk.END)
+        for e in reversed(self.logger.recent):
+            line = f"{e['time'][-8:]}  {e['name']:<14} {e['gait']}"
+            self._log_box.insert(tk.END, line)
+            color = "#ff6b6b" if e["name"] == "Unknown" else "#4ecca3"
+            self._log_box.itemconfig(tk.END, fg=color)
+        self.after(2000, self._refresh_log)
+
+    def _quit(self):
+        self._stop()
         self.destroy()
 
 
-# ──────────────────────────────────────────────
-# Entry point
-# ──────────────────────────────────────────────
-
+# ── Run the app ─────────────────────────────
 if __name__ == "__main__":
     app = App()
     app.mainloop()
