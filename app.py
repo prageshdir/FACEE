@@ -36,6 +36,7 @@ class App(tk.Tk):
         super().__init__()
         self.title("Face & Gait Recognition — Surveillance System")
         self.configure(bg="#1a1a2e")
+        self.geometry("900x560")
         self.protocol("WM_DELETE_WINDOW", self._quit)
 
         # AI modules
@@ -79,8 +80,11 @@ class App(tk.Tk):
         left = tk.Frame(body, bg="#1a1a2e")
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self._canvas = tk.Label(left, bg="#000", width=640, height=480)
-        self._canvas.pack()
+        canvas_frame = tk.Frame(left, bg="#000", width=640, height=480)
+        canvas_frame.pack()
+        canvas_frame.pack_propagate(False)
+        self._canvas = tk.Label(canvas_frame, bg="#000")
+        self._canvas.pack(fill=tk.BOTH, expand=True)
 
         self._status = tk.StringVar(value="Camera is stopped.  Press  ▶ Start  to begin.")
         tk.Label(left, textvariable=self._status,
