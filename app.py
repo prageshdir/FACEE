@@ -76,7 +76,16 @@ class App(tk.Tk):
         body = tk.Frame(self, bg="#1a1a2e")
         body.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-        # Left: video
+        # Right must be packed FIRST so pack manager reserves its space
+        # before the expanding left frame claims everything.
+        right = tk.Frame(body, bg="#1a1a2e", width=220)
+        right.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        right.pack_propagate(False)
+
+        self._build_buttons(right)
+        self._build_log_panel(right)
+
+        # Left: video (packed after right so expand fills only remaining space)
         left = tk.Frame(body, bg="#1a1a2e")
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -90,14 +99,6 @@ class App(tk.Tk):
         tk.Label(left, textvariable=self._status,
                  bg="#1a1a2e", fg="#a0a0c0",
                  font=("Segoe UI", 9)).pack(pady=(4, 0))
-
-        # Right: controls + log
-        right = tk.Frame(body, bg="#1a1a2e", width=220)
-        right.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
-        right.pack_propagate(False)
-
-        self._build_buttons(right)
-        self._build_log_panel(right)
 
         # ── Footer ──
         tk.Label(self,
