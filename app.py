@@ -36,6 +36,8 @@ class App(tk.Tk):
         super().__init__()
         self.title("Face & Gait Recognition — Surveillance System")
         self.configure(bg="#1a1a2e")
+        self.geometry("960x620")
+        self.minsize(800, 500)
         self.protocol("WM_DELETE_WINDOW", self._quit)
 
         # AI modules
@@ -75,25 +77,26 @@ class App(tk.Tk):
         body = tk.Frame(self, bg="#1a1a2e")
         body.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-        # Left: video
-        left = tk.Frame(body, bg="#1a1a2e")
-        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        self._canvas = tk.Label(left, bg="#000", width=640, height=480)
-        self._canvas.pack()
-
-        self._status = tk.StringVar(value="Camera is stopped.  Press  ▶ Start  to begin.")
-        tk.Label(left, textvariable=self._status,
-                 bg="#1a1a2e", fg="#a0a0c0",
-                 font=("Segoe UI", 9)).pack(pady=(4, 0))
-
-        # Right: controls + log
+        # Right panel must be packed BEFORE the expanding left panel so it
+        # always receives its allocated 220 px rather than being squeezed out.
         right = tk.Frame(body, bg="#1a1a2e", width=220)
         right.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
         right.pack_propagate(False)
 
         self._build_buttons(right)
         self._build_log_panel(right)
+
+        # Left: video — expand to fill remaining space
+        left = tk.Frame(body, bg="#1a1a2e")
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self._canvas = tk.Label(left, bg="#000")
+        self._canvas.pack(fill=tk.BOTH, expand=True)
+
+        self._status = tk.StringVar(value="Camera is stopped.  Press  ▶ Start  to begin.")
+        tk.Label(left, textvariable=self._status,
+                 bg="#1a1a2e", fg="#a0a0c0",
+                 font=("Segoe UI", 9)).pack(pady=(4, 0))
 
         # ── Footer ──
         tk.Label(self,
@@ -236,7 +239,12 @@ class App(tk.Tk):
         """Runs in GUI thread every 30ms — displays latest frame."""
         if self.running and self.current_frame is not None:
             rgb = cv2.cvtColor(self.current_frame, cv2.COLOR_BGR2RGB)
-            img = ImageTk.PhotoImage(Image.fromarray(rgb))
+            cw = self._canvas.winfo_width()
+            ch = self._canvas.winfo_height()
+            pil = Image.fromarray(rgb)
+            if cw > 1 and ch > 1:
+                pil = pil.resize((cw, ch), Image.NEAREST)
+            img = ImageTk.PhotoImage(pil)
             self._canvas.imgtk = img      # hold reference to prevent GC
             self._canvas.config(image=img)
             self._persons_lbl.config(text=f"Persons in DB: {self.recognizer.person_count}")
