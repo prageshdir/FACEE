@@ -4,7 +4,7 @@ MCA Major Project
 
 HOW TO RUN:
   1. Open Command Prompt (CMD)
-  2. Go to this folder:  cd path\to\FACEE
+  2. Go to this folder:  cd path\\to\\FACEE
   3. Install libraries:  pip install -r requirements.txt
   4. Run the app:        python app.py
 """

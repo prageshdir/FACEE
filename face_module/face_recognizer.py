@@ -9,13 +9,13 @@ import cv2
 import numpy as np
 import pickle
 
-if not hasattr(cv2, "face"):
+if not hasattr(cv2, "face") or not hasattr(cv2.face, "LBPHFaceRecognizer_create"):
     raise ImportError(
-        "\n\n[ERROR] cv2.face module not found.\n"
-        "You have 'opencv-python' installed, but this app needs 'opencv-contrib-python'.\n\n"
+        "\n\n[ERROR] cv2.face.LBPHFaceRecognizer_create not found.\n"
+        "This usually means opencv-contrib-python is missing or the wrong version.\n\n"
         "Fix:\n"
-        "  1. pip uninstall opencv-python\n"
-        "  2. pip install opencv-contrib-python\n"
+        "  1. pip uninstall opencv-python opencv-contrib-python\n"
+        "  2. pip install opencv-contrib-python==4.10.0.84\n"
     )
 
 
