@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+*.egg
+
+# Models (large binary files — regenerated automatically)
+models/face_encodings.pkl
+
+# Dataset images (too large for git)
+dataset/lfw/
+dataset/lfw-deepfunneled/
+dataset/lfw_funneled/
+dataset/gait_data/
+
+# Logs and screenshots
+logs/
+screenshots/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kaggle credentials
+kaggle.json
