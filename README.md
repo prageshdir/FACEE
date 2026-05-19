@@ -82,6 +82,13 @@ You can open this file in Excel.
 **"ModuleNotFoundError" error**
 - Run Step 3 again: `pip install opencv-contrib-python numpy Pillow`
 
+**"AttributeError: module 'cv2.face' has no attribute 'LBPHFaceRecognizer_create'" error**
+- You have the wrong OpenCV package. Run these two commands:
+  ```
+  pip uninstall opencv-python
+  pip install opencv-contrib-python
+  ```
+
 **Python not recognized**
 - Download Python from https://www.python.org/downloads/
 - During install, check the box **"Add Python to PATH"**

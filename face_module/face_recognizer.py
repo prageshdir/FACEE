@@ -9,6 +9,15 @@ import cv2
 import numpy as np
 import pickle
 
+if not hasattr(cv2, "face"):
+    raise ImportError(
+        "\n\n[ERROR] cv2.face module not found.\n"
+        "You have 'opencv-python' installed, but this app needs 'opencv-contrib-python'.\n\n"
+        "Fix:\n"
+        "  1. pip uninstall opencv-python\n"
+        "  2. pip install opencv-contrib-python\n"
+    )
+
 
 class FaceRecognizer:
     MODEL_FILE = "models/lbph_model.yml"
