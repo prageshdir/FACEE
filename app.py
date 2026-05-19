@@ -40,21 +40,38 @@ class App(tk.Tk):
         self.minsize(800, 500)
         self.protocol("WM_DELETE_WINDOW", self._quit)
 
-        # AI modules
-        self.detector   = FaceDetector()
-        self.recognizer = FaceRecognizer()
-        self.motion     = MotionDetector()
-        self.gait       = GaitAnalyzer()
-        self.logger     = RecognitionLogger()
-
-        # State
+        # State — initialised before _build_ui so button callbacks are always safe
         self.cap            = None
         self.running        = False
-        self.current_frame  = None        # latest annotated frame (BGR)
-        self._last_log      = {}          # name -> last log time
+        self.current_frame  = None
+        self._last_log      = {}
+        self.detector       = None
+        self.recognizer     = None
+        self.motion         = None
+        self.gait           = None
+        self.logger         = None
 
+        # Build UI unconditionally so the window is never blank
         self._build_ui()
         self._refresh_log()
+
+        # Load AI modules after UI is visible; show an error if they fail
+        try:
+            self.detector   = FaceDetector()
+            self.recognizer = FaceRecognizer()
+            self.motion     = MotionDetector()
+            self.gait       = GaitAnalyzer()
+            self.logger     = RecognitionLogger()
+            self._persons_lbl.config(text=f"Persons in DB: {self.recognizer.person_count}")
+        except Exception as exc:
+            self._btn_start.config(state=tk.DISABLED)
+            messagebox.showerror(
+                "Module Load Error",
+                f"{exc}\n\n"
+                "Fix:\n"
+                "  pip uninstall opencv-python\n"
+                "  pip install opencv-contrib-python"
+            )
 
     # ─────────────────────────────────────────
     # UI Layout
@@ -117,12 +134,12 @@ class App(tk.Tk):
             b.pack(pady=3)
             return b
 
-        self._btn_start = btn("▶  Start Camera",  "#4ecca3", self._start)
-        self._btn_stop  = btn("■  Stop Camera",   "#ff6b6b", self._stop, state=tk.DISABLED)
-        btn("📸  Register My Face",  "#ffd166", self._register_face)
-        btn("💾  Screenshot",        "#a29bfe", self._screenshot)
-        btn("🔄  Reload Face DB",    "#74b9ff", self._reload_db)
-        btn("🗑  Clear Log",         "#636e72", self._clear_log)
+        self._btn_start = btn("Start Camera",    "#4ecca3", self._start)
+        self._btn_stop  = btn("Stop Camera",     "#ff6b6b", self._stop, state=tk.DISABLED)
+        btn("Register My Face",  "#ffd166", self._register_face)
+        btn("Screenshot",        "#a29bfe", self._screenshot)
+        btn("Reload Face DB",    "#74b9ff", self._reload_db)
+        btn("Clear Log",         "#636e72", self._clear_log)
 
         self._fps_lbl = tk.Label(parent, text="FPS: --",
                                  bg="#1a1a2e", fg="#ffd166",
@@ -258,6 +275,9 @@ class App(tk.Tk):
 
     def _register_face(self):
         """Capture current frame and save face to database."""
+        if self.detector is None or self.recognizer is None:
+            messagebox.showerror("Not Ready", "AI modules failed to load. Check the console.")
+            return
         if self.current_frame is None:
             messagebox.showwarning("No Frame", "Start the camera first, then click Register.")
             return
@@ -295,22 +315,26 @@ class App(tk.Tk):
         messagebox.showinfo("Saved", f"Screenshot saved to:\n{path}")
 
     def _reload_db(self):
+        if self.recognizer is None:
+            return
         self.recognizer.reload()
         messagebox.showinfo("Reloaded",
                             f"Face database reloaded.\n{self.recognizer.person_count} person(s) found.")
 
     def _clear_log(self):
-        self.logger.recent.clear()
+        if self.logger is not None:
+            self.logger.recent.clear()
         self._log_box.delete(0, tk.END)
 
     def _refresh_log(self):
         """Update the log panel every 2 seconds."""
         self._log_box.delete(0, tk.END)
-        for e in reversed(self.logger.recent):
-            line = f"{e['time'][-8:]}  {e['name']:<14} {e['gait']}"
-            self._log_box.insert(tk.END, line)
-            color = "#ff6b6b" if e["name"] == "Unknown" else "#4ecca3"
-            self._log_box.itemconfig(tk.END, fg=color)
+        if self.logger is not None:
+            for e in reversed(self.logger.recent):
+                line = f"{e['time'][-8:]}  {e['name']:<14} {e['gait']}"
+                self._log_box.insert(tk.END, line)
+                color = "#ff6b6b" if e["name"] == "Unknown" else "#4ecca3"
+                self._log_box.itemconfig(tk.END, fg=color)
         self.after(2000, self._refresh_log)
 
     def _quit(self):
