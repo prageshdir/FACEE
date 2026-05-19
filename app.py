@@ -36,7 +36,8 @@ class App(tk.Tk):
         super().__init__()
         self.title("Face & Gait Recognition — Surveillance System")
         self.configure(bg="#1a1a2e")
-        self.geometry("900x560")
+        self.geometry("920x600")
+        self.minsize(920, 600)
         self.protocol("WM_DELETE_WINDOW", self._quit)
 
         # AI modules
@@ -75,19 +76,13 @@ class App(tk.Tk):
         # ── Body: video feed (left) + controls (right) ──
         body = tk.Frame(self, bg="#1a1a2e")
         body.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        body.columnconfigure(0, weight=1)   # left column expands
+        body.columnconfigure(1, minsize=230)  # right column fixed
+        body.rowconfigure(0, weight=1)
 
-        # Right must be packed FIRST so pack manager reserves its space
-        # before the expanding left frame claims everything.
-        right = tk.Frame(body, bg="#1a1a2e", width=220)
-        right.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
-        right.pack_propagate(False)
-
-        self._build_buttons(right)
-        self._build_log_panel(right)
-
-        # Left: video (packed after right so expand fills only remaining space)
+        # Left: video
         left = tk.Frame(body, bg="#1a1a2e")
-        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        left.grid(row=0, column=0, sticky="nsew")
 
         canvas_frame = tk.Frame(left, bg="#000", width=640, height=480)
         canvas_frame.pack()
@@ -99,6 +94,14 @@ class App(tk.Tk):
         tk.Label(left, textvariable=self._status,
                  bg="#1a1a2e", fg="#a0a0c0",
                  font=("Segoe UI", 9)).pack(pady=(4, 0))
+
+        # Right: controls + log
+        right = tk.Frame(body, bg="#1a1a2e", width=230)
+        right.grid(row=0, column=1, sticky="ns", padx=(10, 0))
+        right.grid_propagate(False)
+
+        self._build_buttons(right)
+        self._build_log_panel(right)
 
         # ── Footer ──
         tk.Label(self,
