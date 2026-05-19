@@ -116,7 +116,7 @@ class App(tk.Tk):
 
         self._btn_start = btn("▶  Start Camera",  "#4ecca3", self._start)
         self._btn_stop  = btn("■  Stop Camera",   "#ff6b6b", self._stop, state=tk.DISABLED)
-        btn("📸  Register My Face",  "#ffd166", self._register)
+        btn("📸  Register My Face",  "#ffd166", self._register_face)
         btn("💾  Screenshot",        "#a29bfe", self._screenshot)
         btn("🔄  Reload Face DB",    "#74b9ff", self._reload_db)
         btn("🗑  Clear Log",         "#636e72", self._clear_log)
@@ -248,7 +248,7 @@ class App(tk.Tk):
     # Button actions
     # ─────────────────────────────────────────
 
-    def _register(self):
+    def _register_face(self):
         """Capture current frame and save face to database."""
         if self.current_frame is None:
             messagebox.showwarning("No Frame", "Start the camera first, then click Register.")
