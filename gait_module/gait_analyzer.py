@@ -1,46 +1,52 @@
 """
 Gait Analyzer
-Classifies gait (Standing / Walking / Running) from a centroid + silhouette trail.
+Classifies gait (Standing / Walking / Running) and, when a trained gallery
+model is available, identifies *who* is walking.
 
-Improvements over the speed-only baseline, inspired by the GEI notebook approach:
+Classification uses four motion features (speed, vertical oscillation,
+area variation, height variation) as improved in the previous refactor.
 
-  1. Multi-feature classification:
-       • avg_speed      — overall centroid displacement per frame
-       • y_oscillation  — std-dev of frame-to-frame vertical displacement;
-                          walking/running produce a regular up-down bounce
-       • area_cv        — coefficient of variation of blob area; high for
-                          running (limbs flail) and near-zero for standing
-       • height_cv      — coefficient of variation of bounding-box height;
-                          captures limb swing that changes silhouette height
-
-  2. Longer trail (45 frames) and higher MIN_FRAMES (15) give the classifier
-     more temporal context before emitting a label.
-
-  3. Weighted scoring combines all four features rather than relying on a
-     single speed threshold — mirrors the GEI idea of building a single
-     descriptor from many frames.
+Identity recognition uses the GEI + PCA + KNN pipeline from the notebook:
+  - Each active track accumulates cropped silhouette frames.
+  - Once MIN_SILHOUETTES frames are buffered, a GEI is computed and matched
+    against the gallery with KNN in PCA space.
+  - The result is shown in the overlay as  "Subject 001 (82%)"  alongside
+    the gait label.
 """
 
 from collections import deque
+
 import numpy as np
 import time
 
+from .gait_recognizer import GaitRecognizer
+
 
 class GaitAnalyzer:
-    TRAIL_LEN  = 45   # frames of history per track
-    MIN_FRAMES = 15   # minimum frames before classifying
+    TRAIL_LEN  = 45
+    MIN_FRAMES = 15
 
     def __init__(self):
         # track_id → deque of (cx, cy, timestamp, area, height)
         self.tracks: dict[int, deque] = {}
         self._next_id = 0
+        self.recognizer = GaitRecognizer()   # loads saved model if present
 
     # ── Public API ────────────────────────────────────────────
 
-    def update(self, persons):
+    def update(self, persons: list, mask=None) -> list:
         """
         Feed current-frame detections.
-        Returns list of result dicts: {track_id, label, score, bbox, centroid}.
+
+        Args:
+            persons: list of {bbox, centroid, area} dicts from MotionDetector
+            mask:    optional binary uint8 mask (same size as frame) — when
+                     provided and the gait model is trained, silhouettes are
+                     cropped from it for identity recognition.
+
+        Returns list of result dicts:
+            {track_id, label, score, bbox, centroid,
+             person_id (str|None), person_conf (int)}
         """
         active_ids = set()
         results = []
@@ -54,28 +60,38 @@ class GaitAnalyzer:
             self.tracks[tid].append((cx, cy, time.time(), area, h))
             active_ids.add(tid)
 
+            # Gait motion classification
             label, score = self._classify(tid)
+
+            # Identity recognition via GEI (requires mask + trained model)
+            person_id, person_conf = None, 0
+            if mask is not None and self.recognizer.trained:
+                sil = GaitRecognizer.crop_silhouette(mask, p["bbox"])
+                self.recognizer.add_silhouette(tid, sil)
+                person_id, person_conf = self.recognizer.predict_track(tid)
+
             results.append({
-                "track_id": tid,
-                "label":    label,
-                "score":    score,
-                "bbox":     p["bbox"],
-                "centroid": (cx, cy),
+                "track_id":    tid,
+                "label":       label,
+                "score":       score,
+                "bbox":        p["bbox"],
+                "centroid":    (cx, cy),
+                "person_id":   person_id,
+                "person_conf": person_conf,
             })
 
         # Prune disappeared tracks
         for tid in list(self.tracks.keys()):
             if tid not in active_ids:
                 del self.tracks[tid]
+                self.recognizer.remove_track(tid)
 
         return results
 
     # ── Internal helpers ──────────────────────────────────────
 
-    def _get_track(self, cx, cy, max_dist=80):
-        """Match centroid to nearest existing track or create a new one."""
+    def _get_track(self, cx: int, cy: int, max_dist: int = 80) -> int:
         best_id, best_dist = None, float("inf")
-
         for tid, trail in self.tracks.items():
             if not trail:
                 continue
@@ -84,48 +100,33 @@ class GaitAnalyzer:
             if d < best_dist:
                 best_dist = d
                 best_id = tid
-
         if best_id is not None and best_dist < max_dist:
             return best_id
-
         new_id = self._next_id
         self._next_id += 1
         self.tracks[new_id] = deque(maxlen=self.TRAIL_LEN)
         return new_id
 
-    def _classify(self, tid):
-        """
-        Multi-feature gait classification.
-        Returns (label, score_percent).
-        """
+    def _classify(self, tid: int) -> tuple[str, int]:
+        """Multi-feature gait classification. Returns (label, score%)."""
         trail = list(self.tracks[tid])
         if len(trail) < self.MIN_FRAMES:
             return "Detecting...", 0
 
-        positions = np.array([(x, y)   for x, y, *_ in trail])
-        areas     = np.array([a         for *_, a, _ in trail])
-        heights   = np.array([h         for *_, h    in trail])
+        positions = np.array([(x, y) for x, y, *_ in trail])
+        areas     = np.array([a       for *_, a, _ in trail])
+        heights   = np.array([h       for *_, h    in trail])
 
-        # ── Feature 1: average speed (px/frame) ──
         diffs     = np.diff(positions, axis=0)
         distances = np.hypot(diffs[:, 0], diffs[:, 1])
         avg_speed = float(np.mean(distances))
 
-        # ── Feature 2: vertical oscillation ──
-        # Walking/running produce a rhythmic up-down bounce in the y-axis.
         y_diffs       = np.diff(positions[:, 1])
         y_oscillation = float(np.std(y_diffs))
 
-        # ── Feature 3: silhouette area variation (coefficient of variation) ──
-        # Running stretches/compresses the blob more than walking.
-        area_mean = float(np.mean(areas)) + 1e-6
-        area_cv   = float(np.std(areas)) / area_mean
+        area_cv   = float(np.std(areas))   / (float(np.mean(areas))   + 1e-6)
+        height_cv = float(np.std(heights)) / (float(np.mean(heights)) + 1e-6)
 
-        # ── Feature 4: bounding-box height variation ──
-        height_mean = float(np.mean(heights)) + 1e-6
-        height_cv   = float(np.std(heights)) / height_mean
-
-        # ── Combined gait score (higher = more vigorous motion) ──
         motion_score = (
             avg_speed     * 1.0 +
             y_oscillation * 1.5 +
@@ -133,7 +134,6 @@ class GaitAnalyzer:
             height_cv     * 20
         )
 
-        # ── Decision boundaries ──
         if motion_score < 4.0:
             label = "Standing"
             score = min(95, int(90 - motion_score * 5))
