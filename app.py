@@ -260,8 +260,12 @@ class App(tk.Tk):
     # ─────────────────────────────────────────
 
     def _register_face(self):
-        """Capture current frame and save face to database."""
-        if self.current_frame is None:
+        """
+        Burst-capture 5 face frames over ~1.5 s, then register all of them.
+        5 frames × 9 augments = 45 training images per person — enough for
+        LBPH and FisherFaces to generalise across expression and micro-pose.
+        """
+        if self.cap is None or not self.running:
             messagebox.showwarning("No Frame", "Start the camera first, then click Register.")
             return
 
@@ -270,23 +274,49 @@ class App(tk.Tk):
             return
         name = name.strip().replace(" ", "_")
 
-        # Detect face in current frame
-        gray = cv2.cvtColor(self.current_frame, cv2.COLOR_BGR2GRAY)
-        boxes = self.detector.detect(self.current_frame)
+        # Show countdown so the user knows captures are happening
+        self._status.set("Hold still — capturing 5 frames for registration…")
+        self.update_idletasks()
 
-        if not boxes:
+        face_crops: list = []
+        attempts   = 0
+        max_attempts = 90   # ~3 s at 30 fps
+
+        while len(face_crops) < 5 and attempts < max_attempts:
+            attempts += 1
+            if self.current_frame is None:
+                self.after(50)
+                continue
+
+            frame = self.current_frame.copy()
+            boxes = self.detector.detect(frame)
+            if not boxes:
+                self.after(50)
+                continue
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            x, y, w, h = max(boxes, key=lambda b: b[2] * b[3])
+            face_crops.append(gray[y:y+h, x:x+w])
+
+            n = len(face_crops)
+            self._status.set(f"Captured {n}/5 frames — keep looking at camera…")
+            self.update_idletasks()
+            time.sleep(0.3)   # spread captures over time for pose variety
+
+        self._status.set("Camera running…")
+
+        if not face_crops:
             messagebox.showerror("No Face Found",
-                                 "No face detected in the current frame.\n"
-                                 "Make sure your face is clearly visible.")
+                                 "Could not detect a face during capture.\n"
+                                 "Make sure your face is clearly visible and well-lit.")
             return
 
-        # Use the first (largest) detected face
-        x, y, w, h = max(boxes, key=lambda b: b[2] * b[3])
-        face_crop = gray[y:y+h, x:x+w]
-
-        ok, msg = self.recognizer.register_face(face_crop, name)
+        ok, msg = self.recognizer.register_multiple(face_crops, name)
         if ok:
-            messagebox.showinfo("Success! ✓", msg)
+            messagebox.showinfo(
+                "Registration Complete",
+                f"{msg}\n\nTip: register again from a slightly different angle "
+                "or lighting to improve accuracy further.")
         else:
             messagebox.showerror("Failed", msg)
 

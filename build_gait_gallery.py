@@ -128,7 +128,9 @@ def evaluate(recognizer: GaitRecognizer,
     """Rank-1 identification report on the probe set."""
     from sklearn.preprocessing import normalize
 
-    X_norm = normalize(X_probe, norm="l2")
+    # Apply the same HOG + L2-norm + PCA + LDA pipeline used at training time
+    X_hog  = np.vstack([GaitRecognizer.extract_features(x) for x in X_probe])
+    X_norm = normalize(X_hog, norm="l2")
     X_pca  = recognizer.pca.transform(X_norm)
     X_feat = recognizer.lda.transform(X_pca) if recognizer.lda is not None else X_pca
     dists, indices = recognizer.knn.kneighbors(X_feat)
