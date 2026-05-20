@@ -1,11 +1,24 @@
 """
 Gait Analyzer
-Tracks a person's position over time and classifies their movement.
+Classifies gait (Standing / Walking / Running) from a centroid + silhouette trail.
 
-Logic:
-  - Keep last 30 positions (centroid trail)
-  - Measure how fast the centroid moves (speed in pixels/frame)
-  - Classify: Standing | Walking | Running
+Improvements over the speed-only baseline, inspired by the GEI notebook approach:
+
+  1. Multi-feature classification:
+       • avg_speed      — overall centroid displacement per frame
+       • y_oscillation  — std-dev of frame-to-frame vertical displacement;
+                          walking/running produce a regular up-down bounce
+       • area_cv        — coefficient of variation of blob area; high for
+                          running (limbs flail) and near-zero for standing
+       • height_cv      — coefficient of variation of bounding-box height;
+                          captures limb swing that changes silhouette height
+
+  2. Longer trail (45 frames) and higher MIN_FRAMES (15) give the classifier
+     more temporal context before emitting a label.
+
+  3. Weighted scoring combines all four features rather than relying on a
+     single speed threshold — mirrors the GEI idea of building a single
+     descriptor from many frames.
 """
 
 from collections import deque
@@ -14,53 +27,59 @@ import time
 
 
 class GaitAnalyzer:
-    TRAIL_LEN = 30      # how many past positions to remember
-    MIN_FRAMES = 10     # need this many frames before classifying
+    TRAIL_LEN  = 45   # frames of history per track
+    MIN_FRAMES = 15   # minimum frames before classifying
 
     def __init__(self):
-        # Each track: track_id -> deque of (cx, cy, time)
-        self.tracks = {}
+        # track_id → deque of (cx, cy, timestamp, area, height)
+        self.tracks: dict[int, deque] = {}
         self._next_id = 0
+
+    # ── Public API ────────────────────────────────────────────
 
     def update(self, persons):
         """
-        Feed current frame's detected persons.
-        Returns list of results: {track_id, label, score, bbox, centroid}
+        Feed current-frame detections.
+        Returns list of result dicts: {track_id, label, score, bbox, centroid}.
         """
         active_ids = set()
         results = []
 
         for p in persons:
             cx, cy = p["centroid"]
+            _, _, w, h = p["bbox"]
+            area = p["area"]
+
             tid = self._get_track(cx, cy)
-            self.tracks[tid].append((cx, cy, time.time()))
+            self.tracks[tid].append((cx, cy, time.time(), area, h))
             active_ids.add(tid)
 
             label, score = self._classify(tid)
             results.append({
                 "track_id": tid,
-                "label": label,
-                "score": score,
-                "bbox": p["bbox"],
-                "centroid": (cx, cy)
+                "label":    label,
+                "score":    score,
+                "bbox":     p["bbox"],
+                "centroid": (cx, cy),
             })
 
-        # Remove tracks that disappeared
+        # Prune disappeared tracks
         for tid in list(self.tracks.keys()):
             if tid not in active_ids:
                 del self.tracks[tid]
 
         return results
 
+    # ── Internal helpers ──────────────────────────────────────
+
     def _get_track(self, cx, cy, max_dist=80):
-        """Match centroid to nearest existing track, or create new track."""
-        best_id = None
-        best_dist = float("inf")
+        """Match centroid to nearest existing track or create a new one."""
+        best_id, best_dist = None, float("inf")
 
         for tid, trail in self.tracks.items():
             if not trail:
                 continue
-            lx, ly, _ = trail[-1]
+            lx, ly, *_ = trail[-1]
             d = np.hypot(cx - lx, cy - ly)
             if d < best_dist:
                 best_dist = d
@@ -69,7 +88,6 @@ class GaitAnalyzer:
         if best_id is not None and best_dist < max_dist:
             return best_id
 
-        # New person detected
         new_id = self._next_id
         self._next_id += 1
         self.tracks[new_id] = deque(maxlen=self.TRAIL_LEN)
@@ -77,29 +95,53 @@ class GaitAnalyzer:
 
     def _classify(self, tid):
         """
-        Classify gait from centroid trail.
+        Multi-feature gait classification.
         Returns (label, score_percent).
         """
         trail = list(self.tracks[tid])
         if len(trail) < self.MIN_FRAMES:
             return "Detecting...", 0
 
-        positions = np.array([(x, y) for x, y, _ in trail])
+        positions = np.array([(x, y)   for x, y, *_ in trail])
+        areas     = np.array([a         for *_, a, _ in trail])
+        heights   = np.array([h         for *_, h    in trail])
 
-        # Calculate frame-to-frame movement distances
-        diffs = np.diff(positions, axis=0)
+        # ── Feature 1: average speed (px/frame) ──
+        diffs     = np.diff(positions, axis=0)
         distances = np.hypot(diffs[:, 0], diffs[:, 1])
-        avg_speed = float(np.mean(distances))  # pixels per frame
+        avg_speed = float(np.mean(distances))
 
-        # Classify based on speed
-        if avg_speed < 3:
+        # ── Feature 2: vertical oscillation ──
+        # Walking/running produce a rhythmic up-down bounce in the y-axis.
+        y_diffs       = np.diff(positions[:, 1])
+        y_oscillation = float(np.std(y_diffs))
+
+        # ── Feature 3: silhouette area variation (coefficient of variation) ──
+        # Running stretches/compresses the blob more than walking.
+        area_mean = float(np.mean(areas)) + 1e-6
+        area_cv   = float(np.std(areas)) / area_mean
+
+        # ── Feature 4: bounding-box height variation ──
+        height_mean = float(np.mean(heights)) + 1e-6
+        height_cv   = float(np.std(heights)) / height_mean
+
+        # ── Combined gait score (higher = more vigorous motion) ──
+        motion_score = (
+            avg_speed     * 1.0 +
+            y_oscillation * 1.5 +
+            area_cv       * 30  +
+            height_cv     * 20
+        )
+
+        # ── Decision boundaries ──
+        if motion_score < 4.0:
             label = "Standing"
-            score = 90
-        elif avg_speed < 15:
+            score = min(95, int(90 - motion_score * 5))
+        elif motion_score < 18.0:
             label = "Walking"
-            score = min(100, int(avg_speed * 6))
+            score = min(95, int(40 + motion_score * 3))
         else:
             label = "Running"
-            score = min(100, int(avg_speed * 3))
+            score = min(100, int(50 + motion_score * 2))
 
-        return label, score
+        return label, max(score, 0)
