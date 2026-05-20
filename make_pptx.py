@@ -471,47 +471,129 @@ def s14_team(prs, n):
 
 # ── 15. Gantt Chart ──────────────────────────────────────────
 def s15_gantt(prs, n):
+    from lxml import etree as ET
+
     sl = new_slide(prs)
     title_bar(sl, "Gantt Chart", n)
-    ph(sl, "Table 2: Gantt Chart",
+    ph(sl, "Table 2: Project Gantt Chart",
        Inches(0.4), Inches(1.05), Inches(9.2), Inches(0.3),
        sz=11, italic=True, color=GRAY)
 
-    phases = [
-        ("Phase 1: Literature Review & Planning",       "Aug – Sep 2024",   True),
-        ("Phase 2: System Design & Architecture",        "Oct 2024",         True),
-        ("Phase 3: Face Detection Module (YuNet CNN)",   "Nov 2024",         True),
-        ("Phase 4: Face Recognition Module (SFace CNN)", "Nov – Dec 2024",   True),
-        ("Phase 5: Gait Detection Module (MOG2)",        "Dec 2024",         True),
-        ("Phase 6: GUI Integration & Testing",           "Jan 2025",         True),
-        ("Phase 7: Accuracy Measurement & Evaluation",  "Feb 2025",         True),
-        ("Phase 8: Report Writing & Presentation",       "Mar 2025",         False),
+    GANTT_RED   = RGBColor(0xFF, 0x00, 0x00)
+    GANTT_GREEN = RGBColor(0x00, 0xB0, 0x50)
+    NS_A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+
+    # 15 rows: 1 header + 7 activities × 2 sub-rows
+    tbl_shape = sl.shapes.add_table(
+        15, 7, Inches(0.3), Inches(1.42), Inches(9.4), Inches(5.5))
+    tbl = tbl_shape.table
+
+    tbl.columns[0].width = Inches(1.75)
+    for i in range(1, 7):
+        tbl.columns[i].width = Inches(1.275)
+    tbl.rows[0].height = Inches(0.5)
+    for i in range(1, 15):
+        tbl.rows[i].height = Inches(0.357)
+
+    def _borders(cell, w_emu=12700):
+        tc = cell._tc
+        tcPr = tc.find(f'{{{NS_A}}}tcPr')
+        if tcPr is None:
+            tcPr = ET.SubElement(tc, f'{{{NS_A}}}tcPr')
+        for tag in ['lnL', 'lnR', 'lnT', 'lnB']:
+            ln = ET.SubElement(tcPr, f'{{{NS_A}}}{tag}')
+            ln.set('w', str(w_emu))
+            sf = ET.SubElement(ln, f'{{{NS_A}}}solidFill')
+            cl = ET.SubElement(sf, f'{{{NS_A}}}srgbClr')
+            cl.set('val', '000000')
+
+    def _fill(cell, color):
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = color
+
+    def _text(cell, txt, bold=False, sz=10, color=BLACK,
+              bg=WHITE, align=PP_ALIGN.CENTER):
+        _fill(cell, bg)
+        tf = cell.text_frame
+        tf.word_wrap = True
+        for pi, line in enumerate(txt.split('\n')):
+            p = tf.paragraphs[0] if pi == 0 else tf.add_paragraph()
+            p.alignment = align
+            r = p.add_run()
+            r.text = line
+            r.font.bold = bold
+            r.font.size = Pt(sz)
+            r.font.color.rgb = color
+
+    # Add borders to every cell first (before any fill/merge)
+    for ri in range(15):
+        for ci in range(7):
+            _borders(tbl.cell(ri, ci))
+
+    # Header row
+    hdrs = ["Activities",
+            "28 Jan–\n7 Feb", "8 Feb–\n19 Mar", "20 Mar–\n2 May",
+            "3 May–\n6 Jun",  "7 Jun–\n4 Jul",  "5 Jul–\n10 Jul"]
+    for ci, hdr in enumerate(hdrs):
+        _text(tbl.cell(0, ci), hdr, bold=True, sz=10, color=BLACK, bg=WHITE)
+
+    # Activity plan: (top_row_fills, bottom_row_fills) per 6 period columns
+    E = WHITE
+    R = GANTT_RED
+    G = GANTT_GREEN
+    acts = [
+        "Feasibility\nStudy",
+        "Literature\nSurvey",
+        "Interface\nDesign",
+        "Database\nDevelopment",
+        "Module\nIntegration",
+        "Testing and\nDeployment",
+        "Documentation",
     ]
-    cols = [Inches(4.6), Inches(2.3), Inches(1.9)]
-    hdrs = ["Activity", "Timeline", "Status"]
-    x0, y0, rh = Inches(0.3), Inches(1.42), Inches(0.58)
+    plan = [
+        ([R, R, E, E, E, E], [G, G, E, E, E, E]),  # Feasibility
+        ([R, R, E, R, R, E], [G, G, E, E, E, E]),  # Literature Survey
+        ([E, R, R, E, E, E], [E, G, E, E, E, E]),  # Interface Design
+        ([E, R, R, R, R, E], [E, G, G, E, E, E]),  # Database Dev
+        ([E, E, E, R, R, E], [E, E, E, E, E, E]),  # Module Integration
+        ([E, E, E, E, R, R], [E, E, E, E, E, E]),  # Testing & Deployment
+        ([R, R, E, R, R, R], [G, G, E, E, E, E]),  # Documentation
+    ]
 
-    x = x0
-    for hdr, w in zip(hdrs, cols):
-        box(sl, x, y0, w, rh, MBLU)
-        ph(sl, hdr, x + Inches(0.07), y0 + Inches(0.1), w, rh,
-           sz=12, bold=True, color=WHITE)
-        x += w
+    for ai, (act, (top_f, bot_f)) in enumerate(zip(acts, plan)):
+        tr, br = 1 + ai * 2, 2 + ai * 2
 
-    for i, (phase, timeline, done) in enumerate(phases):
-        bg = LGRAY if i % 2 == 0 else WHITE
-        status = "✔  Completed" if done else "⬜  Pending"
-        sc = GREEN if done else RED
-        x = x0
-        for cell, w in zip([phase, timeline, status], cols):
-            box(sl, x, y0 + rh + i * rh, w, rh, bg)
-            ph(sl, cell,
-               x + Inches(0.07),
-               y0 + rh + i * rh + Inches(0.08),
-               w - Inches(0.1), rh,
-               sz=11, color=sc if cell == status else BLACK,
-               bold=(cell == status))
-            x += w
+        # Merge activity name cell over 2 rows in column 0
+        tbl.cell(tr, 0).merge(tbl.cell(br, 0))
+        mc = tbl.cell(tr, 0)
+        _fill(mc, WHITE)
+        tf = mc.text_frame
+        tf.word_wrap = True
+        for pi, line in enumerate(act.split('\n')):
+            p = tf.paragraphs[0] if pi == 0 else tf.add_paragraph()
+            p.alignment = PP_ALIGN.LEFT
+            r = p.add_run()
+            r.text = line
+            r.font.bold = True
+            r.font.size = Pt(11)
+            r.font.color.rgb = BLACK
+
+        # Period fills — top sub-row (planned) and bottom sub-row (actual)
+        for ci, c in enumerate(top_f):
+            _fill(tbl.cell(tr, ci + 1), c)
+        for ci, c in enumerate(bot_f):
+            _fill(tbl.cell(br, ci + 1), c)
+
+    # Legend
+    y_leg = Inches(7.0)
+    box(sl, Inches(3.5), y_leg, Inches(0.25), Inches(0.18), GANTT_RED)
+    ph(sl, "Planned Schedule",
+       Inches(3.8), y_leg - Inches(0.01), Inches(1.6), Inches(0.22),
+       sz=10, color=BLACK)
+    box(sl, Inches(5.7), y_leg, Inches(0.25), Inches(0.18), GANTT_GREEN)
+    ph(sl, "Actual Progress",
+       Inches(6.0), y_leg - Inches(0.01), Inches(1.5), Inches(0.22),
+       sz=10, color=BLACK)
 
 
 # ── 16. Architecture Diagram ─────────────────────────────────
