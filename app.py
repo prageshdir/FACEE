@@ -77,25 +77,29 @@ class App(tk.Tk):
         body = tk.Frame(self, bg="#1a1a2e")
         body.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-        # Left: video
-        left = tk.Frame(body, bg="#1a1a2e")
-        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        self._canvas = tk.Label(left, bg="#000", width=640, height=480)
-        self._canvas.pack()
-
-        self._status = tk.StringVar(value="Camera is stopped.  Press  ▶ Start  to begin.")
-        tk.Label(left, textvariable=self._status,
-                 bg="#1a1a2e", fg="#a0a0c0",
-                 font=("Segoe UI", 9)).pack(pady=(4, 0))
-
-        # Right: controls + log
+        # Right: controls + log — pack FIRST so it always gets its 220 px
         right = tk.Frame(body, bg="#1a1a2e", width=220)
         right.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
         right.pack_propagate(False)
 
         self._build_buttons(right)
         self._build_log_panel(right)
+
+        # Left: video — packed second; fills whatever space remains
+        left = tk.Frame(body, bg="#1a1a2e")
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Fixed-pixel container so the Label never uses character-unit sizing
+        _video_frame = tk.Frame(left, bg="#000", width=640, height=480)
+        _video_frame.pack()
+        _video_frame.pack_propagate(False)
+        self._canvas = tk.Label(_video_frame, bg="#000")
+        self._canvas.pack(fill=tk.BOTH, expand=True)
+
+        self._status = tk.StringVar(value="Camera is stopped.  Press  ▶ Start  to begin.")
+        tk.Label(left, textvariable=self._status,
+                 bg="#1a1a2e", fg="#a0a0c0",
+                 font=("Segoe UI", 9)).pack(pady=(4, 0))
 
         # ── Footer ──
         tk.Label(self,
