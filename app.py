@@ -36,6 +36,8 @@ class App(tk.Tk):
         super().__init__()
         self.title("Face & Gait Recognition — Surveillance System")
         self.configure(bg="#1a1a2e")
+        self.geometry("1100x640")
+        self.minsize(900, 580)
         self.protocol("WM_DELETE_WINDOW", self._quit)
 
         # AI modules
