@@ -215,8 +215,8 @@ class App(tk.Tk):
                     self.logger.log(name, conf)
 
             # ── Step 3: Detect moving persons (gait) ──
-            persons, _ = self.motion.detect(frame)
-            gait_results = self.gait.update(persons)
+            persons, mask = self.motion.detect(frame)
+            gait_results = self.gait.update(persons, mask)
 
             for g in gait_results:
                 x, y, w, h = g["bbox"]
@@ -225,6 +225,11 @@ class App(tk.Tk):
                 cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 165, 255), 2)
                 cv2.putText(frame, gait_label, (x, y + h + 18),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 200, 255), 2)
+                # Show identity when gait gallery model is available
+                if g.get("person_id"):
+                    id_label = f"ID: {g['person_id']}  {g['person_conf']}%"
+                    cv2.putText(frame, id_label, (x, y + h + 36),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 2)
 
             # ── Step 4: Overlay FPS + timestamp ──
             frame_count += 1
