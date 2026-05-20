@@ -8,8 +8,11 @@ venv/
 .venv/
 *.egg
 
-# Models (large binary files — regenerated automatically)
+# Models (large binary files — auto-downloaded/generated at runtime)
 models/face_encodings.pkl
+models/face_embeddings.pkl
+models/*.onnx
+models/*.yml
 
 # Dataset images (too large for git)
 dataset/lfw/
