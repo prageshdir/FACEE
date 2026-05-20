@@ -1,8 +1,8 @@
 @echo off
-title Face & Gait Recognition - Setup & Run
+title Face ^& Gait Recognition - Setup ^& Run
 
 echo ============================================
-echo  Face & Gait Recognition Surveillance App
+echo  Face ^& Gait Recognition Surveillance App
 echo ============================================
 echo.
 
