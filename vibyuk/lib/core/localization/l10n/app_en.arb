@@ -1,0 +1,68 @@
+{
+  "@@locale": "en",
+  "appName": "VIBYUK",
+  "@appName": { "description": "The application name" },
+
+  "tagline": "Create. Collaborate. Vibe.",
+  "@tagline": { "description": "App tagline shown on splash and onboarding" },
+
+  "commonOk": "OK",
+  "commonCancel": "Cancel",
+  "commonConfirm": "Confirm",
+  "commonRetry": "Try Again",
+  "commonSave": "Save",
+  "commonDelete": "Delete",
+  "commonEdit": "Edit",
+  "commonDone": "Done",
+  "commonClose": "Close",
+  "commonNext": "Next",
+  "commonBack": "Back",
+  "commonSkip": "Skip",
+  "commonLoading": "Loading…",
+  "commonSearch": "Search",
+  "commonFilter": "Filter",
+  "commonClear": "Clear",
+
+  "errorGeneric": "Something went wrong. Please try again.",
+  "errorNoInternet": "No internet connection. Please check your network.",
+  "errorSessionExpired": "Your session has expired. Please log in again.",
+  "errorServerError": "Our servers are having a moment. Please try again later.",
+  "errorNotFound": "The requested resource was not found.",
+
+  "authLogin": "Log In",
+  "authRegister": "Sign Up",
+  "authLogout": "Log Out",
+  "authForgotPassword": "Forgot Password?",
+  "authResetPassword": "Reset Password",
+  "authEmail": "Email",
+  "authPassword": "Password",
+  "authConfirmPassword": "Confirm Password",
+  "authFullName": "Full Name",
+  "authAlreadyHaveAccount": "Already have an account? {action}",
+  "@authAlreadyHaveAccount": {
+    "placeholders": { "action": { "type": "String" } }
+  },
+  "authDontHaveAccount": "Don't have an account? {action}",
+  "@authDontHaveAccount": {
+    "placeholders": { "action": { "type": "String" } }
+  },
+
+  "navHome": "Home",
+  "navExplore": "Explore",
+  "navBookings": "Bookings",
+  "navMessages": "Messages",
+  "navProfile": "Profile",
+
+  "notificationsTitle": "Notifications",
+  "notificationsEmpty": "No notifications yet",
+  "notificationsEmptyMessage": "We'll notify you when something happens.",
+
+  "settingsTitle": "Settings",
+  "settingsAccount": "Account",
+  "settingsNotifications": "Notifications",
+  "settingsPrivacy": "Privacy",
+  "settingsAppearance": "Appearance",
+  "settingsThemeLight": "Light",
+  "settingsThemeDark": "Dark",
+  "settingsThemeSystem": "System"
+}
